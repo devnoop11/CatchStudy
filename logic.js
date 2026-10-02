@@ -9,6 +9,12 @@ export function electiveDone(course,state){
 }
 export const colors=['#246bc1','#188078','#a96918','#7656ac','#b3445a','#607589','#344a60'];
 export const fresh=()=>({version:1,progress:{},electives:[],calendar:null,rule:'studyArea',eventColors:{},links:{}});
+export function resetStudyProgress(state){
+ const next=structuredClone(state);
+ next.progress=Object.fromEntries(Object.entries(next.progress).filter(([,entry])=>entry?.color).map(([id,entry])=>[id,{status:'planned',grade:'',notes:'',color:entry.color}]));
+ next.electives=next.electives.map(entry=>({...entry,grade:'',completed:false}));
+ return next;
+}
 export function totals(state){
  const ww=state.electives.filter(e=>e.completed).reduce((n,e)=>n+e.ects,0);
  const finished=courses.filter(c=>c.type!=='elective'&&state.progress[c.id]?.status==='completed');
