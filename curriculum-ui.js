@@ -1,0 +1,32 @@
+import {proposeCourses,replaceCurriculum} from './curriculum.js?v=7';
+import {areas} from './logic.js?v=7';
+import {readCurriculumPDF} from './pdf-reader.js?v=7';
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const names={type:'LV-Typ',ects:'ECTS',term:'Semester',module:'Modulkürzel',moduleTitle:'Modultitel',area:'Modulgruppe',requires:'Voraussetzungen'};
+export function mountCurriculumImport(app,getState,commit){
+ const section=document.createElement('section');section.className='card';
+ section.innerHTML=`<h2>Neues Curriculum importieren</h2><p>Die PDF wird nur lokal gelesen. Der neue Plan löst den alten vollständig ab. Fehlende Angaben ergänzt du erst nach der Übernahme. Der bisherige Datenstand bleibt als Wiederherstellungskopie erhalten.</p><p class="warning">Nicht erkannte LV und Wahlfachblöcke kannst du manuell hinzufügen. ECTS-Summen sind bis dahin vorläufig. Unvollständige LV bleiben aus Planungsvorschlägen ausgeschlossen.</p><label>Curriculum-PDF auswählen<input id="curriculum-file" type="file" accept="application/pdf,.pdf"></label><p role="status" id="curriculum-status"></p><div id="curriculum-preview"></div>`;
+ app.prepend(section);const status=section.querySelector('#curriculum-status'),preview=section.querySelector('#curriculum-preview'),input=section.querySelector('input');
+ input.onchange=async()=>{const file=input.files[0];if(!file)return;input.disabled=true;preview.replaceChildren();try{
+  const pages=await readCurriculumPDF(file,(n,total)=>status.textContent=`Lese Seite ${n} von ${total} …`),rows=proposeCourses(pages);
+  status.textContent=`${rows.length} Einträge · ${rows.reduce((n,r)=>n+r.course.ects,0)} ECTS erkannt. Noch nichts gespeichert.`;
+  if(!rows.length){status.textContent='Keine LV erkannt. Der alte Plan bleibt unverändert.';return;}
+  preview.innerHTML=`<p>Alle ${rows.length} erkannten LV übernehmen. Alte, nicht enthaltene LV und Wahlfacheinträge bleiben nur in der Sicherung. Passend zugeordnete Noten und der Kalender bleiben erhalten.</p><details><summary>Erkannte LV anzeigen</summary>${rows.map(r=>`<p>${esc(r.course.title)} · ${r.course.ects} ECTS · ${esc(r.course.term.title)} · ${esc(r.course.module)}<br><small>Voraussetzungen: ${esc(r.course.requires.join('; ')||'Keine')} · Seite ${r.page}</small></p>`).join('')}</details><button class="primary">Neues Curriculum übernehmen</button>`;
+  preview.querySelector('button').onclick=async event=>{event.target.disabled=true;try{await commit(replaceCurriculum(getState(),rows,file.name));document.querySelector('#curriculum-status').textContent='Neues Curriculum gespeichert. Fehlende Angaben unten ergänzen.';}catch(e){status.textContent=e.message;event.target.disabled=false;}};
+ }catch(e){status.textContent='Import fehlgeschlagen: '+e.message;}finally{input.disabled=false;input.value='';}};
+ if(getState().beforeCurriculum){const b=document.createElement('button');b.textContent='Alten Datenstand wiederherstellen';b.onclick=async()=>{if(confirm('Alten Datenstand wiederherstellen? Änderungen seit dem Import werden zurückgesetzt.'))try{await commit(getState().beforeCurriculum);}catch(e){status.textContent=e.message;}};section.append(b);}
+ const plan=getState().curriculum;if(!plan)return;
+ const editor=document.createElement('section');editor.className='card';section.after(editor);
+ editor.innerHTML=`<h2>LV-Angaben ergänzen</h2><p>${esc(plan.name)} · ${plan.courses.length} LV</p><button id="add-plan-course">Nicht erkannte LV / Wahlfachblock hinzufügen</button>${plan.courses.map(c=>`<details><summary>${esc(c.title)} <small>${c.missing?.length?'Noch offen: '+c.missing.map(k=>names[k]).join(', '):'Vollständig'}</small></summary><button data-edit-plan="${c.id}">Angaben bearbeiten</button></details>`).join('')}<div id="plan-course-editor"></div><p role="status" id="plan-edit-status"></p>`;
+ function edit(c){const slot=editor.querySelector('#plan-course-editor');const options=(values,value)=>Object.entries(values).map(([k,v])=>`<option value="${k}" ${k===value?'selected':''}>${v}</option>`).join('');
+  slot.innerHTML=`<h3>LV-Angaben</h3><form><label>Titel<input name="title" required value="${esc(c.title||'')}"></label><label>LV-Typ<select name="type">${options({unknown:'Noch offen',vo:'VO',vu:'VU',ue:'UE',uk:'UK',lp:'LP',se:'SE',ps:'PS',elective:'Wahlfachblock'},c.type)}</select></label><label>ECTS (leer = offen)<input name="ects" type="number" min="0.1" max="180" step="0.1" value="${c.ects||''}"></label><label>Semester (leer = offen)<input name="term" type="number" min="1" max="20" step="1" value="${c.term?.order===99?'':c.term?.order||''}"></label>${['module','moduleTitle'].map(k=>`<label>${names[k]}<input name="${k}" value="${esc(c[k]==='Nicht zugeordnet'?'':c[k]||'')}"></label>`).join('')}<label>Modulgruppe<select name="area">${options(areas,c.area)}</select></label><label>Voraussetzungen (mit Semikolon trennen)<input name="requires" value="${esc((c.requires||['UNGEPRUEFT']).join('; '))}"></label><p>UNGEPRUEFT = noch offen. Leer = keine Voraussetzungen. Teilangaben können gespeichert werden.</p><button class="primary">Angaben speichern</button></form>`;
+  slot.scrollIntoView({block:'center'});
+  slot.querySelector('form').onsubmit=async event=>{event.preventDefault();event.stopPropagation();const f=new FormData(event.target),next=structuredClone(getState()),term=Number(f.get('term'))||99;
+   const value={...c,id:c.id||'import-'+crypto.randomUUID(),title:f.get('title').trim(),type:f.get('type'),ects:Number(f.get('ects')),term:{order:term,title:term===99?'Semester noch offen':term+'. Semester'},module:f.get('module').trim()||'Nicht zugeordnet',moduleTitle:f.get('moduleTitle').trim()||'Nicht zugeordnet',area:f.get('area'),requires:f.get('requires').split(';').map(s=>s.trim()).filter(Boolean),recommends:c.recommends||[],order:c.order??next.curriculum.courses.length};
+   const index=next.curriculum.courses.findIndex(x=>x.id===value.id);if(index<0)next.curriculum.courses.push(value);else next.curriculum.courses[index]=value;
+   try{await commit(next);document.querySelector('#plan-edit-status').textContent='LV-Angaben gespeichert.';}catch(e){editor.querySelector('#plan-edit-status').textContent=e.message;}
+  };
+ }
+ editor.querySelectorAll('[data-edit-plan]').forEach(b=>b.onclick=()=>edit(plan.courses.find(c=>c.id===b.dataset.editPlan)));
+ editor.querySelector('#add-plan-course').onclick=()=>edit({type:'unknown',area:'unknown'});
+}

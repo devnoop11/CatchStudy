@@ -4,3 +4,7 @@ label:has(input[type=checkbox]){display:flex;align-items:center;gap:8px}input[ty
 .grid:has(.ring)>.row{min-width:0;flex-wrap:nowrap;gap:12px}
 .grid:has(.ring)>.row>div:first-child{min-width:0;overflow-wrap:anywhere}
 .ring{flex:0 0 90px}
+.pdf-row summary{flex-wrap:wrap;align-items:center}
+.pdf-selection{display:flex;align-items:center;gap:8px;margin:4px 0;color:var(--blue);font-size:13px}
+.pdf-selection input[type=checkbox]{width:22px;height:22px;flex:0 0 22px;margin:0}
+button:disabled{opacity:.5;cursor:not-allowed}
